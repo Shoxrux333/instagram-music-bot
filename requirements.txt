@@ -2,7 +2,6 @@ python-telegram-bot
 instagrapi
 yt-dlp
 ShazamAPI
-pydub
+librosa
 requests
 python-dotenv
-ffmpeg-python

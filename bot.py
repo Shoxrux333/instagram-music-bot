@@ -13,6 +13,7 @@ from ShazamAPI import Shazam
 import subprocess
 import tempfile
 from dotenv import load_dotenv
+import librosa
 
 # .env faylini yuklash
 load_dotenv()
