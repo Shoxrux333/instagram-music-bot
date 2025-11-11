@@ -38,26 +38,36 @@ TEMP_DIR.mkdir(exist_ok=True)
 DOWNLOADS_DIR = Path("downloads")
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
+# Video hajmi limiti (30MB)
+MAX_VIDEO_SIZE = 30 * 1024 * 1024  # 30MB in bytes
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Bot boshlash komandasi"""
     welcome_text = """
-🎵 **Instagram Music Bot** 🎵
+🎵 **Video Music Bot** 🎵
 
-Salom! Men Instagram videolaridan musiqani yuklab olaman va qoshiq nomini aytaman.
+Salom! Men videolardan musiqani yuklab olaman va qoshiq nomini aytaman.
+
+**Qabul qiladigan manbalar:**
+📱 Instagram (reel, post)
+🎥 YouTube (video, short)
+📌 Pinterest (video)
 
 **Qanday ishlash kerak:**
-1. Instagram video linkini menga jo'nating
-2. Bot videoni MP4 qilib yuklab oladi
-3. Audio qismini analiz qilib qoshiq nomini topadi
-4. Video va qoshiq nomini sizga jo'natadi
+1️⃣ Video linkini jo'nating
+2️⃣ Bot videoni MP4 qilib yuklab oladi
+3️⃣ Audio qismini analiz qilib qoshiq nomini topadi
+4️⃣ Video va qoshiq nomini sizga jo'natadi
 
-**Misal:**
-`https://www.instagram.com/reel/ABC123DEF/`
+**Qoshiq qidirish:**
+- Qoshiq nomini yuborsangiz, YouTube dan topib linkini berib qo'yaman
+- Misal: "Bohemian Rhapsody" yoki "Bohemian Rhapsody Queen"
 
 **Komandalar:**
 /start - Bu xabar
 /help - Yordam
+/search - Qoshiq qidirish
     """
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
@@ -65,26 +75,31 @@ Salom! Men Instagram videolaridan musiqani yuklab olaman va qoshiq nomini aytama
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Yordam komandasi"""
     help_text = """
-**Qanday ishlash kerak:**
+**📱 Video Yuklab Olish:**
 
-1️⃣ Instagram reel yoki post linkini jo'nating
-2️⃣ Bot videoni yuklab oladi (MP4)
+1️⃣ Instagram, YouTube yoki Pinterest video linkini jo'nating
+2️⃣ Bot videoni yuklab oladi (30MB gacha)
 3️⃣ Audio qismini Shazam orqali analiz qiladi
 4️⃣ Qoshiq nomini va artistni aytadi
 
-**Qabul qiladigan linklar:**
-- Instagram reels: https://www.instagram.com/reel/...
-- Instagram posts: https://www.instagram.com/p/...
-- Instagram stories (agar saqlanib qolgan bo'lsa)
+**🎵 Qoshiq Qidirish:**
 
-**Masalalar:**
-- Private akkauntdan video bo'lsa, ishlaydi
-- Juda uzun videolar vaqt olishi mumkin
-- Audio qismida musiqasi bo'lmasa, topilmaydi
+/search Qoshiq Nomi - YouTube dan qoshiq qidirish
+Misal: `/search Bohemian Rhapsody`
+
+**Qabul qiladigan linklar:**
+- Instagram: https://www.instagram.com/reel/...
+- YouTube: https://www.youtube.com/watch?v=...
+- Pinterest: https://www.pinterest.com/pin/...
+
+**Cheklovlar:**
+- Video hajmi: 30MB gacha
+- Audio sifati: Yaxshi bo'lishi kerak
+- Qoshiq: Shazam bazasida bo'lishi kerak
 
 **Savol-javoblar:**
 Q: Videoning hajmi qancha bo'lishi kerak?
-J: 50MB gacha
+J: 30MB gacha
 
 Q: Qancha vaqt oladi?
 J: Odatda 1-3 minut
@@ -95,16 +110,29 @@ J: Bot "Topilmadi" deb aytadi
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 
-def download_instagram_video(url: str, output_path: Path) -> bool:
-    """Instagram videoni yuklab olish"""
+def get_video_source(url: str) -> str:
+    """Video manbasi aniqlash"""
+    if 'instagram.com' in url:
+        return 'instagram'
+    elif 'youtube.com' in url or 'youtu.be' in url:
+        return 'youtube'
+    elif 'pinterest.com' in url:
+        return 'pinterest'
+    else:
+        return 'unknown'
+
+
+def download_video(url: str, output_path: Path) -> tuple[bool, str]:
+    """Videoni yuklab olish"""
     try:
-        logger.info(f"Instagram videoni yuklab olish: {url}")
+        logger.info(f"Videoni yuklab olish: {url}")
         
         ydl_opts = {
             'format': 'best[ext=mp4]',
             'outtmpl': str(output_path / '%(id)s.%(ext)s'),
             'quiet': False,
             'no_warnings': False,
+            'socket_timeout': 30,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -112,15 +140,21 @@ def download_instagram_video(url: str, output_path: Path) -> bool:
             video_file = output_path / f"{info['id']}.mp4"
             
             if video_file.exists():
+                file_size = video_file.stat().st_size
+                
+                # Hajmni tekshirish
+                if file_size > MAX_VIDEO_SIZE:
+                    video_file.unlink()
+                    return False, f"Video hajmi juda katta ({file_size / (1024*1024):.1f}MB). 30MB gacha bo'lishi kerak."
+                
                 logger.info(f"Video muvaffaqiyatli yuklab olindi: {video_file}")
-                return True
+                return True, str(video_file)
             else:
-                logger.error("Video faylini topib bo'lmadi")
-                return False
+                return False, "Video faylini topib bo'lmadi"
                 
     except Exception as e:
         logger.error(f"Video yuklab olishda xato: {str(e)}")
-        return False
+        return False, f"Xato: {str(e)[:100]}"
 
 
 def extract_audio_from_video(video_path: Path, audio_path: Path) -> bool:
@@ -182,16 +216,80 @@ def recognize_song(audio_path: Path) -> dict:
         return None
 
 
+def search_song_on_youtube(song_name: str) -> str:
+    """YouTube dan qoshiq qidirish"""
+    try:
+        logger.info(f"YouTube dan qoshiq qidirish: {song_name}")
+        
+        ydl_opts = {
+            'format': 'best',
+            'quiet': True,
+            'no_warnings': True,
+        }
+        
+        search_url = f"ytsearch:{song_name}"
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(search_url, download=False)
+            
+            if info and 'entries' in info and len(info['entries']) > 0:
+                first_result = info['entries'][0]
+                video_url = f"https://www.youtube.com/watch?v={first_result['id']}"
+                logger.info(f"Qoshiq topildi: {video_url}")
+                return video_url
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"YouTube qidirish xatosi: {str(e)}")
+        return None
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Instagram linkini qabul qilish va qayta ishlash"""
+    """Xabarni qayta ishlash"""
     
     message_text = update.message.text
     
-    # Instagram linkini tekshirish
-    if 'instagram.com' not in message_text:
+    # Qoshiq qidirish komandasi
+    if message_text.startswith('/search '):
+        song_name = message_text.replace('/search ', '').strip()
+        
+        if not song_name:
+            await update.message.reply_text("❌ Qoshiq nomini kiritib qo'ying!\n\nMisal: `/search Bohemian Rhapsody`", parse_mode='Markdown')
+            return
+        
+        await update.message.chat.send_action(ChatAction.TYPING)
+        searching_msg = await update.message.reply_text(f"🔍 '{song_name}' qidirmoqda...")
+        
+        try:
+            youtube_url = search_song_on_youtube(song_name)
+            
+            if youtube_url:
+                await searching_msg.edit_text(
+                    f"✅ **Qoshiq topildi!**\n\n"
+                    f"🎵 **Nomi:** {song_name}\n"
+                    f"🎥 **YouTube:** {youtube_url}",
+                    parse_mode='Markdown'
+                )
+            else:
+                await searching_msg.edit_text(f"❌ '{song_name}' YouTube da topilmadi.")
+        
+        except Exception as e:
+            logger.error(f"Qoshiq qidirish xatosi: {str(e)}")
+            await searching_msg.edit_text(f"❌ Xato: {str(e)[:100]}")
+        
+        return
+    
+    # Video linkini tekshirish
+    if not any(source in message_text for source in ['instagram.com', 'youtube.com', 'youtu.be', 'pinterest.com']):
         await update.message.reply_text(
-            "❌ Iltimos, Instagram linkini jo'nating!\n\n"
-            "Misal: https://www.instagram.com/reel/ABC123DEF/"
+            "❌ Iltimos, video linkini jo'nating!\n\n"
+            "Qabul qiladigan manbalar:\n"
+            "📱 Instagram\n"
+            "🎥 YouTube\n"
+            "📌 Pinterest\n\n"
+            "Yoki qoshiq qidirish uchun: `/search Qoshiq Nomi`",
+            parse_mode='Markdown'
         )
         return
     
@@ -205,21 +303,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         session_dir.mkdir(exist_ok=True)
         
         # 1. Videoni yuklab olish
-        await processing_msg.edit_text("📥 Instagram videoni yuklab olayotgan bo'lman...")
+        await processing_msg.edit_text("📥 Videoni yuklab olayotgan bo'lman...")
         
-        if not download_instagram_video(message_text, session_dir):
-            await processing_msg.edit_text(
-                "❌ Videoni yuklab bo'lmadi. Iltimos, linkni tekshiring va qayta urinib ko'ring."
-            )
+        success, result = download_video(message_text, session_dir)
+        
+        if not success:
+            await processing_msg.edit_text(f"❌ {result}")
             return
         
-        # Yuklab olingan videofaylni topish
-        video_files = list(session_dir.glob('*.mp4'))
-        if not video_files:
-            await processing_msg.edit_text("❌ Video faylini topib bo'lmadi.")
-            return
-        
-        video_path = video_files[0]
+        video_path = Path(result)
         
         # 2. Audioni ajratib olish
         await processing_msg.edit_text("🎵 Audio ajratib olayotgan bo'lman...")
@@ -241,10 +333,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             result_text = (
                 f"✅ **Qoshiq topildi!**\n\n"
                 f"🎵 **Nomi:** {song_info['title']}\n"
-                f"🎤 **Artist:** {song_info['artist']}"
+                f"🎤 **Artist:** {song_info['artist']}\n\n"
+                f"💡 **Qoshiq qidirish:** `/search {song_info['title']}`"
             )
         else:
-            result_text = "⚠️ Qoshiq topilmadi. Video audiosi musiqasiz yoki Shazam topib bo'lmadi."
+            result_text = (
+                "⚠️ Qoshiq topilmadi. Video audiosi musiqasiz yoki Shazam topib bo'lmadi.\n\n"
+                "💡 Qoshiq nomini o'zingiz aytib, qidirish uchun: `/search Qoshiq Nomi`"
+            )
         
         # Videoni jo'natish
         await update.message.chat.send_action(ChatAction.UPLOAD_VIDEO)
