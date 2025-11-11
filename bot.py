@@ -39,7 +39,7 @@ DOWNLOADS_DIR = Path("downloads")
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
 # Video hajmi limiti (30MB)
-MAX_VIDEO_SIZE = 30 * 1024 * 1024  # 30MB in bytes
+MAX_VIDEO_SIZE = 50 * 1024 * 1024  # 30MB in bytes
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
