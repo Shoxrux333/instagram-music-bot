@@ -1,8 +1,8 @@
-python-telegram-bot==20.3
-instagrapi==2.0.0
-yt-dlp==2024.1.1
-ShazamAPI==0.1.5
-pydub==0.25.1
-requests==2.31.0
-python-dotenv==1.0.0
-ffmpeg-python==0.2.1
+python-telegram-bot
+instagrapi
+yt-dlp
+ShazamAPI
+pydub
+requests
+python-dotenv
+ffmpeg-python
