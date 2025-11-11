@@ -60,14 +60,13 @@ Salom! Men videolardan musiqani yuklab olaman va qoshiq nomini aytaman.
 3️⃣ Audio qismini analiz qilib qoshiq nomini topadi
 4️⃣ Video va qoshiq nomini sizga jo'natadi
 
-**Qoshiq qidirish:**
-- Qoshiq nomini yuborsangiz, YouTube dan topib linkini berib qo'yaman
+**🎵 Qoshiq Yuklab Olish:**
+- Qoshiq nomini yuborsangiz, YouTube dan topib MP3 faylda jo'natib qo'yaman
 - Misal: "Bohemian Rhapsody" yoki "Bohemian Rhapsody Queen"
 
 **Komandalar:**
 /start - Bu xabar
 /help - Yordam
-/search - Qoshiq qidirish
     """
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
@@ -82,10 +81,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 3️⃣ Audio qismini Shazam orqali analiz qiladi
 4️⃣ Qoshiq nomini va artistni aytadi
 
-**🎵 Qoshiq Qidirish:**
+**🎵 Qoshiq Yuklab Olish:**
 
-/search Qoshiq Nomi - YouTube dan qoshiq qidirish
-Misal: `/search Bohemian Rhapsody`
+Qoshiq nomini yuborsangiz, YouTube dan topib MP3 faylda jo'natib qo'yaman.
+
+Misal: "Bohemian Rhapsody"
 
 **Qabul qiladigan linklar:**
 - Instagram: https://www.instagram.com/reel/...
@@ -157,6 +157,44 @@ def download_video(url: str, output_path: Path) -> tuple[bool, str]:
         return False, f"Xato: {str(e)[:100]}"
 
 
+def download_song_as_mp3(song_name: str, output_path: Path) -> tuple[bool, str]:
+    """YouTube dan qoshiqni MP3 qilib yuklab olish"""
+    try:
+        logger.info(f"Qoshiqni yuklab olish: {song_name}")
+        
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': str(output_path / '%(title)s.%(ext)s'),
+            'quiet': False,
+            'no_warnings': False,
+            'socket_timeout': 30,
+        }
+        
+        search_url = f"ytsearch:{song_name}"
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(search_url, download=True)
+            
+            if info and 'entries' in info and len(info['entries']) > 0:
+                first_result = info['entries'][0]
+                mp3_file = output_path / f"{first_result['title']}.mp3"
+                
+                if mp3_file.exists():
+                    logger.info(f"Qoshiq muvaffaqiyatli yuklab olindi: {mp3_file}")
+                    return True, str(mp3_file)
+        
+        return False, "Qoshiq topilmadi"
+        
+    except Exception as e:
+        logger.error(f"Qoshiq yuklab olishda xato: {str(e)}")
+        return False, f"Xato: {str(e)[:100]}"
+
+
 def extract_audio_from_video(video_path: Path, audio_path: Path) -> bool:
     """Videodagi audioni ajratib olish"""
     try:
@@ -216,82 +254,50 @@ def recognize_song(audio_path: Path) -> dict:
         return None
 
 
-def search_song_on_youtube(song_name: str) -> str:
-    """YouTube dan qoshiq qidirish"""
-    try:
-        logger.info(f"YouTube dan qoshiq qidirish: {song_name}")
-        
-        ydl_opts = {
-            'format': 'best',
-            'quiet': True,
-            'no_warnings': True,
-        }
-        
-        search_url = f"ytsearch:{song_name}"
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(search_url, download=False)
-            
-            if info and 'entries' in info and len(info['entries']) > 0:
-                first_result = info['entries'][0]
-                video_url = f"https://www.youtube.com/watch?v={first_result['id']}"
-                logger.info(f"Qoshiq topildi: {video_url}")
-                return video_url
-        
-        return None
-        
-    except Exception as e:
-        logger.error(f"YouTube qidirish xatosi: {str(e)}")
-        return None
+def is_video_link(text: str) -> bool:
+    """Matn video link ekanligini tekshirish"""
+    video_sources = ['instagram.com', 'youtube.com', 'youtu.be', 'pinterest.com']
+    return any(source in text for source in video_sources)
+
+
+def is_song_query(text: str) -> bool:
+    """Matn qoshiq nomini tekshirish"""
+    # Qoshiq nomini tekshirish: hech qanday URL bo'lmasa va 2 ta so'zdan ko'p bo'lsa
+    if 'http' in text or 'www' in text:
+        return False
+    
+    # Kamida 2 ta harif bo'lsa, qoshiq nomi deb hisoblash
+    return len(text.strip()) >= 2
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Xabarni qayta ishlash"""
     
-    message_text = update.message.text
-    
-    # Qoshiq qidirish komandasi
-    if message_text.startswith('/search '):
-        song_name = message_text.replace('/search ', '').strip()
-        
-        if not song_name:
-            await update.message.reply_text("❌ Qoshiq nomini kiritib qo'ying!\n\nMisal: `/search Bohemian Rhapsody`", parse_mode='Markdown')
-            return
-        
-        await update.message.chat.send_action(ChatAction.TYPING)
-        searching_msg = await update.message.reply_text(f"🔍 '{song_name}' qidirmoqda...")
-        
-        try:
-            youtube_url = search_song_on_youtube(song_name)
-            
-            if youtube_url:
-                await searching_msg.edit_text(
-                    f"✅ **Qoshiq topildi!**\n\n"
-                    f"🎵 **Nomi:** {song_name}\n"
-                    f"🎥 **YouTube:** {youtube_url}",
-                    parse_mode='Markdown'
-                )
-            else:
-                await searching_msg.edit_text(f"❌ '{song_name}' YouTube da topilmadi.")
-        
-        except Exception as e:
-            logger.error(f"Qoshiq qidirish xatosi: {str(e)}")
-            await searching_msg.edit_text(f"❌ Xato: {str(e)[:100]}")
-        
-        return
+    message_text = update.message.text.strip()
     
     # Video linkini tekshirish
-    if not any(source in message_text for source in ['instagram.com', 'youtube.com', 'youtu.be', 'pinterest.com']):
+    if is_video_link(message_text):
+        await handle_video_link(update, message_text)
+    
+    # Qoshiq nomini tekshirish
+    elif is_song_query(message_text):
+        await handle_song_query(update, message_text)
+    
+    else:
         await update.message.reply_text(
-            "❌ Iltimos, video linkini jo'nating!\n\n"
-            "Qabul qiladigan manbalar:\n"
+            "❌ Iltimos, video linkini yoki qoshiq nomini jo'nating!\n\n"
+            "**Video linklar:**\n"
             "📱 Instagram\n"
             "🎥 YouTube\n"
             "📌 Pinterest\n\n"
-            "Yoki qoshiq qidirish uchun: `/search Qoshiq Nomi`",
+            "**Qoshiq nomini yuborsangiz, MP3 qilib jo'natib qo'yaman**\n"
+            "Misal: `Bohemian Rhapsody`",
             parse_mode='Markdown'
         )
-        return
+
+
+async def handle_video_link(update: Update, url: str) -> None:
+    """Video linkini qayta ishlash"""
     
     # Jarayonni boshlash
     await update.message.chat.send_action(ChatAction.TYPING)
@@ -305,7 +311,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # 1. Videoni yuklab olish
         await processing_msg.edit_text("📥 Videoni yuklab olayotgan bo'lman...")
         
-        success, result = download_video(message_text, session_dir)
+        success, result = download_video(url, session_dir)
         
         if not success:
             await processing_msg.edit_text(f"❌ {result}")
@@ -334,12 +340,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"✅ **Qoshiq topildi!**\n\n"
                 f"🎵 **Nomi:** {song_info['title']}\n"
                 f"🎤 **Artist:** {song_info['artist']}\n\n"
-                f"💡 **Qoshiq qidirish:** `/search {song_info['title']}`"
+                f"💡 **Qoshiqni MP3 qilib olish uchun:** `{song_info['title']}`"
             )
         else:
             result_text = (
                 "⚠️ Qoshiq topilmadi. Video audiosi musiqasiz yoki Shazam topib bo'lmadi.\n\n"
-                "💡 Qoshiq nomini o'zingiz aytib, qidirish uchun: `/search Qoshiq Nomi`"
+                "💡 Qoshiq nomini o'zingiz aytib, MP3 qilib olishingiz mumkin."
             )
         
         # Videoni jo'natish
@@ -352,7 +358,60 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 parse_mode='Markdown'
             )
         
-        logger.info(f"Natija jo'natildi: {update.message.chat_id}")
+        logger.info(f"Video jo'natildi: {update.message.chat_id}")
+        
+    except Exception as e:
+        logger.error(f"Xato: {str(e)}")
+        await processing_msg.edit_text(
+            f"❌ Xato yuz berdi: {str(e)[:100]}\n\n"
+            "Iltimos, qayta urinib ko'ring yoki /help ni bosing."
+        )
+    
+    finally:
+        # Vaqtinchalik fayllarni tozalash
+        try:
+            session_dir = TEMP_DIR / f"session_{update.message.chat_id}"
+            if session_dir.exists():
+                import shutil
+                shutil.rmtree(session_dir)
+        except Exception as e:
+            logger.warning(f"Fayllarni tozalashda xato: {str(e)}")
+
+
+async def handle_song_query(update: Update, song_name: str) -> None:
+    """Qoshiq nomini qayta ishlash"""
+    
+    await update.message.chat.send_action(ChatAction.TYPING)
+    processing_msg = await update.message.reply_text(f"🔍 '{song_name}' qidirmoqda...")
+    
+    try:
+        # Vaqtinchalik papka yaratish
+        session_dir = TEMP_DIR / f"session_{update.message.chat_id}"
+        session_dir.mkdir(exist_ok=True)
+        
+        # Qoshiqni YouTube dan MP3 qilib yuklab olish
+        await processing_msg.edit_text(f"📥 '{song_name}' yuklab olayotgan bo'lman...")
+        
+        success, result = download_song_as_mp3(song_name, session_dir)
+        
+        if not success:
+            await processing_msg.edit_text(f"❌ {result}")
+            return
+        
+        mp3_path = Path(result)
+        
+        # MP3 faylni jo'natish
+        await processing_msg.delete()
+        await update.message.chat.send_action(ChatAction.UPLOAD_AUDIO)
+        
+        with open(mp3_path, 'rb') as audio_file:
+            await update.message.reply_audio(
+                audio=audio_file,
+                title=song_name,
+                caption=f"✅ **Qoshiq:** {song_name}"
+            )
+        
+        logger.info(f"Qoshiq jo'natildi: {update.message.chat_id}")
         
     except Exception as e:
         logger.error(f"Xato: {str(e)}")
