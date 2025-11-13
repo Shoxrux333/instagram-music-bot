@@ -13,7 +13,6 @@ from ShazamAPI import Shazam
 import subprocess
 import tempfile
 from dotenv import load_dotenv
-import librosa
 
 # .env faylini yuklash
 load_dotenv()
@@ -38,8 +37,8 @@ TEMP_DIR.mkdir(exist_ok=True)
 DOWNLOADS_DIR = Path("downloads")
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 
-# Video hajmi limiti (30MB)
-MAX_VIDEO_SIZE = 20 * 1024 * 1024  # 30MB in bytes
+# Video hajmi limiti (20MB - Render.com uchun)
+MAX_VIDEO_SIZE = 20 * 1024 * 1024  # 20MB in bytes
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -60,8 +59,8 @@ Salom! Men videolardan musiqani yuklab olaman va qoshiq nomini aytaman.
 3️⃣ Audio qismini analiz qilib qoshiq nomini topadi
 4️⃣ Video va qoshiq nomini sizga jo'natadi
 
-**🎵 Qoshiq Yuklab Olish:**
-- Qoshiq nomini yuborsangiz, YouTube dan topib MP3 faylda jo'natib qo'yaman
+**🎵 Qoshiq Qidirish:**
+- Qoshiq nomini yuborsangiz, YouTube dan topib linkini berib qo'yaman
 - Misal: "Bohemian Rhapsody" yoki "Bohemian Rhapsody Queen"
 
 **Komandalar:**
@@ -77,13 +76,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 **📱 Video Yuklab Olish:**
 
 1️⃣ Instagram, YouTube yoki Pinterest video linkini jo'nating
-2️⃣ Bot videoni yuklab oladi (30MB gacha)
+2️⃣ Bot videoni yuklab oladi (20MB gacha)
 3️⃣ Audio qismini Shazam orqali analiz qiladi
 4️⃣ Qoshiq nomini va artistni aytadi
 
-**🎵 Qoshiq Yuklab Olish:**
+**🎵 Qoshiq Qidirish:**
 
-Qoshiq nomini yuborsangiz, YouTube dan topib MP3 faylda jo'natib qo'yaman.
+Qoshiq nomini yuborsangiz, YouTube dan topib linkini berib qo'yaman.
 
 Misal: "Bohemian Rhapsody"
 
@@ -93,13 +92,13 @@ Misal: "Bohemian Rhapsody"
 - Pinterest: https://www.pinterest.com/pin/...
 
 **Cheklovlar:**
-- Video hajmi: 30MB gacha
+- Video hajmi: 20MB gacha
 - Audio sifati: Yaxshi bo'lishi kerak
 - Qoshiq: Shazam bazasida bo'lishi kerak
 
 **Savol-javoblar:**
 Q: Videoning hajmi qancha bo'lishi kerak?
-J: 30MB gacha
+J: 20MB gacha
 
 Q: Qancha vaqt oladi?
 J: Odatda 1-3 minut
@@ -145,7 +144,7 @@ def download_video(url: str, output_path: Path) -> tuple[bool, str]:
                 # Hajmni tekshirish
                 if file_size > MAX_VIDEO_SIZE:
                     video_file.unlink()
-                    return False, f"Video hajmi juda katta ({file_size / (1024*1024):.1f}MB). 30MB gacha bo'lishi kerak."
+                    return False, f"Video hajmi juda katta ({file_size / (1024*1024):.1f}MB). 20MB gacha bo'lishi kerak."
                 
                 logger.info(f"Video muvaffaqiyatli yuklab olindi: {video_file}")
                 return True, str(video_file)
@@ -157,41 +156,34 @@ def download_video(url: str, output_path: Path) -> tuple[bool, str]:
         return False, f"Xato: {str(e)[:100]}"
 
 
-def download_song_as_mp3(song_name: str, output_path: Path) -> tuple[bool, str]:
-    """YouTube dan qoshiqni MP3 qilib yuklab olish"""
+def search_song_on_youtube(song_name: str) -> tuple[bool, str]:
+    """YouTube dan qoshiq linkini topish"""
     try:
-        logger.info(f"Qoshiqni yuklab olish: {song_name}")
+        logger.info(f"YouTube dan qoshiq qidirish: {song_name}")
         
         ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'outtmpl': str(output_path / '%(title)s.%(ext)s'),
-            'quiet': False,
-            'no_warnings': False,
+            'format': 'best',
+            'quiet': True,
+            'no_warnings': True,
             'socket_timeout': 30,
         }
         
         search_url = f"ytsearch:{song_name}"
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(search_url, download=True)
+            info = ydl.extract_info(search_url, download=False)
             
             if info and 'entries' in info and len(info['entries']) > 0:
                 first_result = info['entries'][0]
-                mp3_file = output_path / f"{first_result['title']}.mp3"
-                
-                if mp3_file.exists():
-                    logger.info(f"Qoshiq muvaffaqiyatli yuklab olindi: {mp3_file}")
-                    return True, str(mp3_file)
+                video_url = f"https://www.youtube.com/watch?v={first_result['id']}"
+                video_title = first_result.get('title', 'Qoshiq')
+                logger.info(f"Qoshiq topildi: {video_url}")
+                return True, f"{video_title}\n{video_url}"
         
         return False, "Qoshiq topilmadi"
         
     except Exception as e:
-        logger.error(f"Qoshiq yuklab olishda xato: {str(e)}")
+        logger.error(f"YouTube qidirish xatosi: {str(e)}")
         return False, f"Xato: {str(e)[:100]}"
 
 
@@ -262,11 +254,9 @@ def is_video_link(text: str) -> bool:
 
 def is_song_query(text: str) -> bool:
     """Matn qoshiq nomini tekshirish"""
-    # Qoshiq nomini tekshirish: hech qanday URL bo'lmasa va 2 ta so'zdan ko'p bo'lsa
     if 'http' in text or 'www' in text:
         return False
     
-    # Kamida 2 ta harif bo'lsa, qoshiq nomi deb hisoblash
     return len(text.strip()) >= 2
 
 
@@ -285,23 +275,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     else:
         await update.message.reply_text(
-            "❌ Iltimos, video linkini yoki qoshiq nomini jo'nating!\n\n"
-            "**Video linklar:**\n"
-            "📱 Instagram\n"
-            "🎥 YouTube\n"
-            "📌 Pinterest\n\n"
-            "**Qoshiq nomini yuborsangiz, MP3 qilib jo'natib qo'yaman**\n"
-            "Misal: `Bohemian Rhapsody`",
-            parse_mode='Markdown'
+            "Iltimos, video linkini yoki qoshiq nomini jonathing!\n\n"
+            "Video linklar: Instagram, YouTube, Pinterest\n"
+            "Qoshiq nomi: Bohemian Rhapsody"
         )
 
 
 async def handle_video_link(update: Update, url: str) -> None:
     """Video linkini qayta ishlash"""
     
-    # Jarayonni boshlash
     await update.message.chat.send_action(ChatAction.TYPING)
-    processing_msg = await update.message.reply_text("⏳ Videoni yuklab olayotgan bo'lman...")
+    processing_msg = await update.message.reply_text("Videoni yuklab olayotgan bolman...")
     
     try:
         # Vaqtinchalik papka yaratish
@@ -309,63 +293,55 @@ async def handle_video_link(update: Update, url: str) -> None:
         session_dir.mkdir(exist_ok=True)
         
         # 1. Videoni yuklab olish
-        await processing_msg.edit_text("📥 Videoni yuklab olayotgan bo'lman...")
+        await processing_msg.edit_text("Videoni yuklab olayotgan bolman...")
         
         success, result = download_video(url, session_dir)
         
         if not success:
-            await processing_msg.edit_text(f"❌ {result}")
+            await processing_msg.edit_text(f"Xato: {result}")
             return
         
         video_path = Path(result)
         
         # 2. Audioni ajratib olish
-        await processing_msg.edit_text("🎵 Audio ajratib olayotgan bo'lman...")
+        await processing_msg.edit_text("Audio ajratib olayotgan bolman...")
         
         audio_path = session_dir / "audio.mp3"
         if not extract_audio_from_video(video_path, audio_path):
-            await processing_msg.edit_text("❌ Audio ajratishda xato yuz berdi.")
+            await processing_msg.edit_text("Audio ajratishda xato yuz berdi.")
             return
         
         # 3. Qoshiq nomini aniqlash
-        await processing_msg.edit_text("🔍 Qoshiq nomini aniqlayotgan bo'lman...")
+        await processing_msg.edit_text("Qoshiq nomini aniqlayotgan bolman...")
         
         song_info = recognize_song(audio_path)
         
-        # 4. Natijani jo'natish
+        # 4. Natijani jonatish
         await processing_msg.delete()
         
         if song_info:
             result_text = (
-                f"✅ **Qoshiq topildi!**\n\n"
-                f"🎵 **Nomi:** {song_info['title']}\n"
-                f"🎤 **Artist:** {song_info['artist']}\n\n"
-                f"💡 **Qoshiqni MP3 qilib olish uchun:** `{song_info['title']}`"
+                f"Qoshiq topildi!\n\n"
+                f"Nomi: {song_info['title']}\n"
+                f"Artist: {song_info['artist']}"
             )
         else:
-            result_text = (
-                "⚠️ Qoshiq topilmadi. Video audiosi musiqasiz yoki Shazam topib bo'lmadi.\n\n"
-                "💡 Qoshiq nomini o'zingiz aytib, MP3 qilib olishingiz mumkin."
-            )
+            result_text = "Qoshiq topilmadi."
         
-        # Videoni jo'natish
+        # Videoni jonatish
         await update.message.chat.send_action(ChatAction.UPLOAD_VIDEO)
         
         with open(video_path, 'rb') as video_file:
             await update.message.reply_video(
                 video=video_file,
-                caption=result_text,
-                parse_mode='Markdown'
+                caption=result_text
             )
         
-        logger.info(f"Video jo'natildi: {update.message.chat_id}")
+        logger.info(f"Video jonatildi: {update.message.chat_id}")
         
     except Exception as e:
         logger.error(f"Xato: {str(e)}")
-        await processing_msg.edit_text(
-            f"❌ Xato yuz berdi: {str(e)[:100]}\n\n"
-            "Iltimos, qayta urinib ko'ring yoki /help ni bosing."
-        )
+        await processing_msg.edit_text(f"Xato yuz berdi: {str(e)[:100]}")
     
     finally:
         # Vaqtinchalik fayllarni tozalash
@@ -382,53 +358,24 @@ async def handle_song_query(update: Update, song_name: str) -> None:
     """Qoshiq nomini qayta ishlash"""
     
     await update.message.chat.send_action(ChatAction.TYPING)
-    processing_msg = await update.message.reply_text(f"🔍 '{song_name}' qidirmoqda...")
+    processing_msg = await update.message.reply_text(f"'{song_name}' qidirmoqda...")
     
     try:
-        # Vaqtinchalik papka yaratish
-        session_dir = TEMP_DIR / f"session_{update.message.chat_id}"
-        session_dir.mkdir(exist_ok=True)
-        
-        # Qoshiqni YouTube dan MP3 qilib yuklab olish
-        await processing_msg.edit_text(f"📥 '{song_name}' yuklab olayotgan bo'lman...")
-        
-        success, result = download_song_as_mp3(song_name, session_dir)
+        # YouTube dan qoshiq linkini topish
+        success, result = search_song_on_youtube(song_name)
         
         if not success:
-            await processing_msg.edit_text(f"❌ {result}")
+            await processing_msg.edit_text(f"Xato: {result}")
             return
         
-        mp3_path = Path(result)
+        # Linkni jonatish
+        await processing_msg.edit_text(f"Qoshiq topildi!\n\n{result}")
         
-        # MP3 faylni jo'natish
-        await processing_msg.delete()
-        await update.message.chat.send_action(ChatAction.UPLOAD_AUDIO)
-        
-        with open(mp3_path, 'rb') as audio_file:
-            await update.message.reply_audio(
-                audio=audio_file,
-                title=song_name,
-                caption=f"✅ **Qoshiq:** {song_name}"
-            )
-        
-        logger.info(f"Qoshiq jo'natildi: {update.message.chat_id}")
+        logger.info(f"Qoshiq jonatildi: {update.message.chat_id}")
         
     except Exception as e:
         logger.error(f"Xato: {str(e)}")
-        await processing_msg.edit_text(
-            f"❌ Xato yuz berdi: {str(e)[:100]}\n\n"
-            "Iltimos, qayta urinib ko'ring yoki /help ni bosing."
-        )
-    
-    finally:
-        # Vaqtinchalik fayllarni tozalash
-        try:
-            session_dir = TEMP_DIR / f"session_{update.message.chat_id}"
-            if session_dir.exists():
-                import shutil
-                shutil.rmtree(session_dir)
-        except Exception as e:
-            logger.warning(f"Fayllarni tozalashda xato: {str(e)}")
+        await processing_msg.edit_text(f"Xato yuz berdi: {str(e)[:100]}")
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -436,10 +383,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error(f"Xato: {context.error}")
     
     if update and update.message:
-        await update.message.reply_text(
-            "❌ Xato yuz berdi. Iltimos, qayta urinib ko'ring.\n"
-            "/help ni bosing."
-        )
+        await update.message.reply_text("Xato yuz berdi. Qayta urinib koring.")
 
 
 def main() -> None:
